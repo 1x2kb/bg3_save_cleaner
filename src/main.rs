@@ -8,15 +8,19 @@ enum SaveType {
 }
 
 // TODO: Rename
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 enum SelfErrors {
     NameNotDetected(String),
+    NotEnoughUnderscores(String),
+    StringNotNumber(String),
 }
 impl Error for SelfErrors {}
 impl Display for SelfErrors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SelfErrors::NameNotDetected(e) => write!(f, "{:#?}", e),
+            SelfErrors::NotEnoughUnderscores(e) => write!(f, "{:#?}", e),
+            SelfErrors::StringNotNumber(e) => write!(f, "{:#?}", e),
         }
     }
 }
@@ -63,6 +67,29 @@ fn character_name(folder_name: &str) -> Result<String, Box<dyn Error>> {
         .ok_or(Box::new(SelfErrors::NameNotDetected(
             "Could not detect character name".to_string(),
         )))
+}
+
+fn save_number(folder_name: &str) -> Result<u16, SelfErrors> {
+    let folder_name: Vec<&str> = folder_name.split('_').into_iter().collect();
+
+    if folder_name.len() <= 1 {
+        return Err(SelfErrors::NotEnoughUnderscores(
+            "Did not find the correct number of underscores. Cannot continue with this save."
+                .to_string(),
+        ));
+    }
+
+    folder_name
+        .into_iter()
+        .last()
+        .ok_or(SelfErrors::NotEnoughUnderscores(
+            "Could not find any elements".to_string(),
+        ))
+        .and_then(|save_number| {
+            save_number
+                .parse::<u16>()
+                .map_err(|e| SelfErrors::StringNotNumber(e.to_string()))
+        })
 }
 
 #[cfg(test)]
@@ -125,5 +152,67 @@ mod character_name_should {
 
         let name = character_name(test_save).unwrap();
         assert_eq!(name, expected);
+    }
+
+    #[test]
+    fn detect_with_apostrophe() {
+        let test_save = "Some'me-1231415123_{}_277";
+        let expected = "Some'me";
+
+        let name = character_name(test_save).unwrap();
+        assert_eq!(name, expected);
+    }
+}
+
+#[cfg(test)]
+mod save_number_should {
+    use rand::Rng;
+
+    use crate::{save_number, SelfErrors};
+
+    #[test]
+    fn convert_max_number() {
+        let test_save = format!("Some'me-1231415123_QuickSave_{}", u16::MAX);
+
+        let result = save_number(&test_save).unwrap();
+        assert_eq!(result, u16::MAX);
+    }
+
+    #[test]
+    fn convert_minimum_number() {
+        let test_save = format!("Some'me-1231415123_QuickSave_{}", u16::MIN);
+
+        let result = save_number(&test_save).unwrap();
+        assert_eq!(result, u16::MIN);
+    }
+
+    #[test]
+    fn convert_random_number() {
+        let random_u16: u16 = rand::thread_rng().gen_range(1..u16::MAX); // Ignore min and max as that is explicitly tested.
+        let test_save = format!("Some'me-1231415123_QuickSave_{}", random_u16);
+
+        let result = save_number(&test_save).unwrap();
+        assert_eq!(result, random_u16);
+    }
+
+    #[test]
+    fn error_on_negative_number() {
+        let test_save = format!("Some'me-1231415123_QuickSave_{}", -22);
+        let expected = SelfErrors::StringNotNumber("invalid digit found in string".to_string());
+
+        let result = save_number(&test_save).unwrap_err();
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn error_when_no_underscores() {
+        let test_save = "Some'me";
+        let expected = SelfErrors::NotEnoughUnderscores(
+            "Did not find the correct number of underscores. Cannot continue with this save."
+                .to_string(),
+        );
+
+        let result = save_number(&test_save).unwrap_err();
+        assert_eq!(result, expected);
     }
 }
