@@ -1,13 +1,24 @@
-use std::{
-    env,
-    fs::{self, DirEntry},
-};
+use std::{env, error::Error, fmt::Display, fs};
 
 #[derive(Debug, PartialEq, Eq)]
 enum SaveType {
     Quick,
     Auto,
     Unrecognized,
+}
+
+// TODO: Rename
+#[derive(Debug)]
+enum SelfErrors {
+    NameNotDetected(String),
+}
+impl Error for SelfErrors {}
+impl Display for SelfErrors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SelfErrors::NameNotDetected(e) => write!(f, "{:#?}", e),
+        }
+    }
 }
 
 fn main() {
@@ -34,7 +45,7 @@ fn main() {
     };
 }
 
-fn save_type<'a>(folder_name: &str) -> SaveType {
+fn save_type(folder_name: &str) -> SaveType {
     if folder_name.to_ascii_lowercase().contains("quicksave") {
         SaveType::Quick
     } else if folder_name.to_ascii_lowercase().contains("autosave") {
@@ -42,6 +53,16 @@ fn save_type<'a>(folder_name: &str) -> SaveType {
     } else {
         SaveType::Unrecognized
     }
+}
+
+fn character_name(folder_name: &str) -> Result<String, Box<dyn Error>> {
+    folder_name
+        .find('-')
+        .filter(|index| index > &0)
+        .map(|index| folder_name.chars().take(index).collect())
+        .ok_or(Box::new(SelfErrors::NameNotDetected(
+            "Could not detect character name".to_string(),
+        )))
 }
 
 #[cfg(test)]
@@ -72,5 +93,37 @@ mod save_type_should {
 
         let save_type = save_type(save);
         assert_eq!(save_type, SaveType::Unrecognized);
+    }
+}
+
+#[cfg(test)]
+mod character_name_should {
+    use crate::character_name;
+
+    #[test]
+    fn detect_with_space() {
+        let test_save = "Some Name-1231415123_{}_277";
+        let expected = "Some Name";
+
+        let name = character_name(test_save).unwrap();
+        assert_eq!(name, expected);
+    }
+
+    #[test]
+    fn detect_with_underscore() {
+        let test_save = "Some_Name-1231415123_{}_277";
+        let expected = "Some_Name";
+
+        let name = character_name(test_save).unwrap();
+        assert_eq!(name, expected);
+    }
+
+    #[test]
+    fn detect_single_name() {
+        let test_save = "SomeName-1231415123_{}_277";
+        let expected = "SomeName";
+
+        let name = character_name(test_save).unwrap();
+        assert_eq!(name, expected);
     }
 }
