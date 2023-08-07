@@ -59,14 +59,14 @@ fn save_type(folder_name: &str) -> SaveType {
     }
 }
 
-fn character_name(folder_name: &str) -> Result<String, Box<dyn Error>> {
+fn character_name(folder_name: &str) -> Result<String, SelfErrors> {
     folder_name
         .find('-')
         .filter(|index| index > &0)
         .map(|index| folder_name.chars().take(index).collect())
-        .ok_or(Box::new(SelfErrors::NameNotDetected(
+        .ok_or(SelfErrors::NameNotDetected(
             "Could not detect character name".to_string(),
-        )))
+        ))
 }
 
 fn save_number(folder_name: &str) -> Result<u16, SelfErrors> {
@@ -90,6 +90,13 @@ fn save_number(folder_name: &str) -> Result<u16, SelfErrors> {
                 .parse::<u16>()
                 .map_err(|e| SelfErrors::StringNotNumber(e.to_string()))
         })
+}
+
+fn package_details(file_name: &str) -> Result<(u16, String), SelfErrors> {
+    let parse_number = save_number(file_name)?;
+    let characters_name = character_name(file_name)?;
+
+    Ok((parse_number, characters_name))
 }
 
 #[cfg(test)]
@@ -214,5 +221,33 @@ mod save_number_should {
 
         let result = save_number(&test_save).unwrap_err();
         assert_eq!(result, expected);
+    }
+}
+
+#[cfg(test)]
+mod package_details_should {
+    use rand::Rng;
+
+    use crate::package_details;
+
+    #[test]
+    fn package_values_returned() {
+        let rand = rand::thread_rng().gen_range(u16::MIN..=u16::MAX);
+        let test_save = format!("Some'me-1231415123_QuickSave_{}", rand);
+        let expected = (rand, "Some'me".to_string());
+
+        let result = package_details(test_save.as_str()).unwrap();
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn errors_out_when_error_state_occurs() {
+        let test_save = "Some'me";
+
+        let result = package_details(test_save);
+        assert!(
+            result.is_err(),
+            "Package did not error when it was provided insufficient information"
+        );
     }
 }
