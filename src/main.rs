@@ -132,7 +132,7 @@ mod save_type_should {
 
 #[cfg(test)]
 mod character_name_should {
-    use crate::character_name;
+    use crate::{character_name, SelfErrors};
 
     #[test]
     fn detect_with_space() {
@@ -168,6 +168,15 @@ mod character_name_should {
 
         let name = character_name(test_save).unwrap();
         assert_eq!(name, expected);
+    }
+
+    #[test]
+    fn error_when_no_dashes() {
+        let test_save = "Some'me";
+        let expected = SelfErrors::NameNotDetected("Could not detect character name".to_string());
+
+        let error = character_name(test_save).unwrap_err();
+        assert_eq!(error, expected);
     }
 }
 
