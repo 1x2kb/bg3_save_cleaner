@@ -37,13 +37,13 @@ impl SaveInformation {
 
         match save_type {
             SaveType::Quick => SaveInformation {
-                file_name: format!("{}-123456789_QuickSave_{}", character_name, save_number),
+                file_name: format!("{}-123456789__QuickSave_{}", character_name, save_number),
                 character_name,
                 save_type,
                 save_number,
             },
             SaveType::Auto => SaveInformation {
-                file_name: format!("{}-123456789_AutoSave_{}", character_name, save_number),
+                file_name: format!("{}-123456789__AutoSave_{}", character_name, save_number),
                 character_name,
                 save_type,
                 save_number,
@@ -165,7 +165,7 @@ fn package_details(file_name: &str) -> Result<SaveInformation, SelfErrors> {
     ))
 }
 
-fn group_by_save(saves: Vec<SaveInformation>) -> HashMap<String, Saves> {
+fn group_saves(saves: Vec<SaveInformation>) -> HashMap<String, Saves> {
     saves
         .into_iter()
         .fold(HashMap::new(), crate::group_by_character)
@@ -197,6 +197,20 @@ fn insert_save(save_by_type: &mut Saves, save_information: SaveInformation) {
         SaveType::Auto => save_by_type.auto_saves.push(save_information),
         SaveType::Unrecognized => {}
     };
+}
+
+fn sort_map_saves(mut map: HashMap<String, Saves>) -> HashMap<String, Saves> {
+    map.values_mut().for_each(|value| {
+        value
+            .quick_saves
+            .sort_by(|save_a, save_b| save_b.save_number.partial_cmp(&save_a.save_number).unwrap());
+
+        value
+            .auto_saves
+            .sort_by(|save_a, save_b| save_b.save_number.partial_cmp(&save_a.save_number).unwrap())
+    });
+
+    map
 }
 
 #[cfg(test)]
@@ -371,7 +385,7 @@ mod package_details_should {
 mod group_by_character_should {
     use std::collections::HashMap;
 
-    use crate::{group_by_character, group_by_save, SaveInformation, SaveType};
+    use crate::{group_by_character, group_saves, SaveInformation, SaveType};
 
     #[test]
     fn create_and_assign_new_character_quicksave() {
@@ -465,7 +479,7 @@ mod group_by_character_should {
             SaveInformation::new_random(SaveType::Auto, some.clone()),
         ];
 
-        let map = group_by_save(
+        let map = group_saves(
             fl_save_information
                 .clone()
                 .into_iter()
@@ -513,5 +527,47 @@ mod group_by_character_should {
                 "Failed to match save"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod sort_map_saves_should {
+
+    use crate::{group_saves, sort_map_saves, SaveInformation, SaveType};
+
+    #[test]
+    fn sorts_quick_saves() {
+        let mut saves = vec![
+            SaveInformation::new_random(SaveType::Quick, "First Last".to_string()),
+            SaveInformation::new_random(SaveType::Quick, "First Last".to_string()),
+        ];
+        // Force ascending order
+        saves
+            .sort_by(|save_a, save_b| save_a.save_number.partial_cmp(&save_b.save_number).unwrap());
+
+        let map = group_saves(saves.clone());
+        let map = sort_map_saves(map);
+        let fl_saves = map.get("First Last").unwrap();
+
+        assert_eq!(fl_saves.quick_saves.first().unwrap(), saves.last().unwrap());
+        assert_eq!(fl_saves.quick_saves.last().unwrap(), saves.first().unwrap());
+    }
+
+    #[test]
+    fn sorts_auto_saves() {
+        let mut saves = vec![
+            SaveInformation::new_random(SaveType::Auto, "First Last".to_string()),
+            SaveInformation::new_random(SaveType::Auto, "First Last".to_string()),
+        ];
+        // Force ascending order
+        saves
+            .sort_by(|save_a, save_b| save_a.save_number.partial_cmp(&save_b.save_number).unwrap());
+
+        let map = group_saves(saves.clone());
+        let map = sort_map_saves(map);
+        let fl_saves = map.get("First Last").unwrap();
+
+        assert_eq!(fl_saves.auto_saves.first().unwrap(), saves.last().unwrap());
+        assert_eq!(fl_saves.auto_saves.last().unwrap(), saves.first().unwrap());
     }
 }
