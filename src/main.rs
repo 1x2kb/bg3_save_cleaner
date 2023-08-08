@@ -1,13 +1,13 @@
-use std::{env, error::Error, fmt::Display, fs};
+use std::{collections::HashMap, env, error::Error, fmt::Display, fs};
 
-#[derive(Debug, PartialEq, Eq)]
-enum SaveType {
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum SaveType {
     Quick,
     Auto,
     Unrecognized,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 struct SaveInformation {
     pub file_name: String,
     pub character_name: String,
@@ -26,6 +26,43 @@ impl SaveInformation {
             character_name,
             save_type,
             save_number,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn new_random(save_type: SaveType, character_name: String) -> Self {
+        use rand::Rng;
+
+        let save_number = rand::thread_rng().gen_range(u16::MIN..=u16::MAX);
+
+        match save_type {
+            SaveType::Quick => SaveInformation {
+                file_name: format!("{}-123456789_QuickSave_{}", character_name, save_number),
+                character_name,
+                save_type,
+                save_number,
+            },
+            SaveType::Auto => SaveInformation {
+                file_name: format!("{}-123456789_AutoSave_{}", character_name, save_number),
+                character_name,
+                save_type,
+                save_number,
+            },
+            _ => panic!("Not a randomizable save pattern"),
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Default)]
+struct Saves {
+    pub quick_saves: Vec<SaveInformation>,
+    pub auto_saves: Vec<SaveInformation>,
+}
+impl Saves {
+    pub fn new() -> Self {
+        Saves {
+            quick_saves: Vec::new(),
+            auto_saves: Vec::new(),
         }
     }
 }
@@ -93,7 +130,7 @@ fn character_name(folder_name: &str) -> Result<String, SelfErrors> {
 }
 
 fn save_number(folder_name: &str) -> Result<u16, SelfErrors> {
-    let folder_name: Vec<&str> = folder_name.split('_').into_iter().collect();
+    let folder_name: Vec<&str> = folder_name.split('_').collect();
 
     if folder_name.len() <= 1 {
         return Err(SelfErrors::NotEnoughUnderscores(
@@ -126,6 +163,40 @@ fn package_details(file_name: &str) -> Result<SaveInformation, SelfErrors> {
         s_type,
         parse_number,
     ))
+}
+
+fn group_by_save(saves: Vec<SaveInformation>) -> HashMap<String, Saves> {
+    saves
+        .into_iter()
+        .fold(HashMap::new(), crate::group_by_character)
+}
+
+fn group_by_character(
+    mut map: HashMap<String, Saves>,
+    save_information: SaveInformation,
+) -> HashMap<String, Saves> {
+    // TODO: I think there's a better way. Come back to this.
+    let saves = match map.get_mut(&save_information.character_name) {
+        Some(saves) => saves, // Saves already exists
+        None => {
+            // Need to create Saves struct for map
+            let save_by_type = Saves::new();
+            map.insert(save_information.character_name.clone(), save_by_type);
+            map.get_mut(&save_information.character_name).unwrap()
+        }
+    };
+
+    insert_save(saves, save_information);
+
+    map
+}
+
+fn insert_save(save_by_type: &mut Saves, save_information: SaveInformation) {
+    match &save_information.save_type {
+        SaveType::Quick => save_by_type.quick_saves.push(save_information),
+        SaveType::Auto => save_by_type.auto_saves.push(save_information),
+        SaveType::Unrecognized => {}
+    };
 }
 
 #[cfg(test)]
@@ -257,7 +328,7 @@ mod save_number_should {
                 .to_string(),
         );
 
-        let result = save_number(&test_save).unwrap_err();
+        let result = save_number(test_save).unwrap_err();
         assert_eq!(result, expected);
     }
 }
@@ -293,5 +364,154 @@ mod package_details_should {
             result.is_err(),
             "Package did not error when it was provided insufficient information"
         );
+    }
+}
+
+#[cfg(test)]
+mod group_by_character_should {
+    use std::collections::HashMap;
+
+    use crate::{group_by_character, group_by_save, SaveInformation, SaveType};
+
+    #[test]
+    fn create_and_assign_new_character_quicksave() {
+        let map = HashMap::default();
+        let character_name = "First Last".to_string();
+        let save_information =
+            SaveInformation::new_random(SaveType::Quick, character_name.to_string());
+        let expected = save_information.clone();
+
+        let map = group_by_character(map, save_information);
+
+        let save_by_type = map.get(&character_name).unwrap();
+        assert_eq!(save_by_type.quick_saves.len(), 1);
+        assert_eq!(save_by_type.quick_saves.first().unwrap(), &expected);
+    }
+
+    #[test]
+    fn create_and_assign_new_character_autosave() {
+        let map = HashMap::default();
+        let character_name = "First Last".to_string();
+        let save_information = SaveInformation::new_random(SaveType::Auto, character_name.clone());
+        let expected = save_information.clone();
+
+        let map = group_by_character(map, save_information);
+
+        let save_by_type = map.get(&character_name).unwrap();
+        assert_eq!(save_by_type.auto_saves.len(), 1);
+        assert_eq!(save_by_type.auto_saves.first().unwrap(), &expected);
+    }
+
+    #[test]
+    fn multiple_saves_of_single_character() {
+        let map = HashMap::default();
+        let character_name = "First Last".to_string();
+
+        let save_informations = vec![
+            SaveInformation::new_random(SaveType::Quick, character_name.clone()),
+            SaveInformation::new_random(SaveType::Quick, character_name.clone()),
+            SaveInformation::new_random(SaveType::Quick, character_name.clone()),
+        ];
+
+        let map = group_by_character(map, save_informations.first().unwrap().clone());
+        assert_eq!(map.get(&character_name).unwrap().quick_saves.len(), 1);
+        assert_eq!(
+            map.get(&character_name)
+                .unwrap()
+                .quick_saves
+                .first()
+                .unwrap(),
+            save_informations.first().unwrap()
+        );
+
+        let map = group_by_character(map, save_informations.iter().nth(1).unwrap().clone());
+        assert_eq!(map.get(&character_name).unwrap().quick_saves.len(), 2);
+        assert_eq!(
+            map.get(&character_name)
+                .unwrap()
+                .quick_saves
+                .last()
+                .unwrap(),
+            save_informations.iter().nth(1).unwrap()
+        );
+
+        let map = group_by_character(map, save_informations.last().unwrap().clone());
+        assert_eq!(map.get(&character_name).unwrap().quick_saves.len(), 3);
+        assert_eq!(
+            map.get(&character_name)
+                .unwrap()
+                .quick_saves
+                .last()
+                .unwrap(),
+            save_informations.last().unwrap()
+        );
+    }
+
+    #[test]
+    fn multiple_saves_of_multiple_characters() {
+        let (fl, some) = ("First Last".to_string(), "Some'me".to_string());
+
+        let fl_save_information = vec![
+            SaveInformation::new_random(SaveType::Quick, fl.clone()),
+            SaveInformation::new_random(SaveType::Auto, fl.clone()),
+            SaveInformation::new_random(SaveType::Quick, fl.clone()),
+            SaveInformation::new_random(SaveType::Auto, fl.clone()),
+        ];
+
+        let some_save_information = vec![
+            SaveInformation::new_random(SaveType::Quick, some.clone()),
+            SaveInformation::new_random(SaveType::Auto, some.clone()),
+            SaveInformation::new_random(SaveType::Quick, some.clone()),
+            SaveInformation::new_random(SaveType::Auto, some.clone()),
+        ];
+
+        let map = group_by_save(
+            fl_save_information
+                .clone()
+                .into_iter()
+                .chain(some_save_information.clone().into_iter())
+                .collect(),
+        );
+
+        assert_eq!(map.keys().len(), 2);
+        assert!(map.keys().any(|key| key.eq("First Last")));
+        assert!(map.keys().any(|key| key.eq("Some'me")));
+
+        let fl_saves = map.get(&fl).unwrap();
+        let some_saves = map.get(&some).unwrap();
+
+        for save in fl_save_information.into_iter() {
+            assert!(
+                match &save.save_type {
+                    SaveType::Quick => fl_saves
+                        .quick_saves
+                        .iter()
+                        .any(|quick_save| quick_save.eq(&save)),
+                    SaveType::Auto => fl_saves
+                        .auto_saves
+                        .iter()
+                        .any(|auto_save| auto_save.eq(&save)),
+                    SaveType::Unrecognized => panic!("Unrecognized save type was not removed"),
+                },
+                "Failed to match save"
+            );
+        }
+
+        for save in some_save_information.into_iter() {
+            assert!(
+                match &save.save_type {
+                    SaveType::Quick => some_saves
+                        .quick_saves
+                        .iter()
+                        .any(|quick_save| quick_save.eq(&save)),
+                    SaveType::Auto => some_saves
+                        .auto_saves
+                        .iter()
+                        .any(|auto_save| auto_save.eq(&save)),
+                    SaveType::Unrecognized => panic!("Unrecognized save type was not removed"),
+                },
+                "Failed to match save"
+            );
+        }
     }
 }
