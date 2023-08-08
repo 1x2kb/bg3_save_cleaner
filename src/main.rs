@@ -7,6 +7,29 @@ enum SaveType {
     Unrecognized,
 }
 
+#[derive(Debug, PartialEq)]
+struct SaveInformation {
+    pub file_name: String,
+    pub character_name: String,
+    pub save_type: SaveType,
+    pub save_number: u16,
+}
+impl SaveInformation {
+    pub fn new(
+        file_name: String,
+        character_name: String,
+        save_type: SaveType,
+        save_number: u16,
+    ) -> Self {
+        SaveInformation {
+            file_name,
+            character_name,
+            save_type,
+            save_number,
+        }
+    }
+}
+
 // TODO: Rename
 #[derive(Debug, PartialEq)]
 enum SelfErrors {
@@ -92,11 +115,17 @@ fn save_number(folder_name: &str) -> Result<u16, SelfErrors> {
         })
 }
 
-fn package_details(file_name: &str) -> Result<(u16, String), SelfErrors> {
+fn package_details(file_name: &str) -> Result<SaveInformation, SelfErrors> {
     let parse_number = save_number(file_name)?;
     let characters_name = character_name(file_name)?;
+    let s_type = save_type(file_name);
 
-    Ok((parse_number, characters_name))
+    Ok(SaveInformation::new(
+        file_name.to_string(),
+        characters_name,
+        s_type,
+        parse_number,
+    ))
 }
 
 #[cfg(test)]
@@ -237,13 +266,19 @@ mod save_number_should {
 mod package_details_should {
     use rand::Rng;
 
-    use crate::package_details;
+    use crate::{package_details, SaveInformation, SaveType};
 
     #[test]
     fn package_values_returned() {
         let rand = rand::thread_rng().gen_range(u16::MIN..=u16::MAX);
         let test_save = format!("Some'me-1231415123_QuickSave_{}", rand);
-        let expected = (rand, "Some'me".to_string());
+
+        let expected = SaveInformation::new(
+            test_save.clone(),
+            "Some'me".to_string(),
+            SaveType::Quick,
+            rand,
+        );
 
         let result = package_details(test_save.as_str()).unwrap();
         assert_eq!(result, expected);
