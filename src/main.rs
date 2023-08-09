@@ -117,6 +117,7 @@ fn main() {
         })
         .map(crate::group_saves) // Here errors start to matter for the set, don't drop and output below.
         .map(crate::sort_map_saves)
+        .map(|map| get_delete_vec(map, 1usize))
     {
         Ok(map) => println!("{:#?}", map),
         Err(e) => {
