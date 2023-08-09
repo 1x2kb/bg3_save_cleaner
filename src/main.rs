@@ -1,4 +1,12 @@
-use std::{collections::HashMap, env, error::Error, fmt::Display, fs};
+use std::{
+    collections::HashMap,
+    env,
+    error::Error,
+    fmt::Display,
+    fs,
+    io::{stdin, stdout, Write},
+    path::{Path, PathBuf},
+};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum SaveType {
@@ -118,6 +126,8 @@ fn main() {
         .map(crate::group_saves) // Here errors start to matter for the set, don't drop and output below.
         .map(crate::sort_map_saves)
         .map(|map| get_delete_vec(map, 1usize))
+        .map(crate::confirm_user_delete)
+        .and_then(crate::delete)
     {
         Ok(map) => println!("{:#?}", map),
         Err(e) => {
@@ -237,8 +247,8 @@ fn get_delete_vec(map: HashMap<String, Saves>, number_to_preserve: usize) -> Vec
             deletion_saves
                 .into_iter()
                 // Combine existing saves to be deleted with those detected deletable_saves.
-                // The grouping into a map is to apply number_to_preserve to both each character as well as
-                // quick and auto saves.
+                // The grouping into a map is to apply number_to_preserve to each character as well as
+                // quick and auto saves for each character.
                 .chain(
                     deletable_saves(character_saves.quick_saves, number_to_preserve)
                         .into_iter()
@@ -257,6 +267,58 @@ fn deletable_saves(saves: Vec<SaveInformation>, number_to_preserve: usize) -> Ve
     }
 
     saves.into_iter().skip(number_to_preserve).collect()
+}
+
+fn confirm_user_delete(deletable_saves: Vec<SaveInformation>) -> (Vec<SaveInformation>, String) {
+    println!("****");
+    deletable_saves
+        .iter()
+        .enumerate()
+        .for_each(|(i, save)| println!("\t{} | {}", i + 1, &save.file_name));
+    println!("****");
+
+    print!("Do you want to delete the above files? y/n: ");
+    let _ = stdout().flush();
+
+    let mut user_input = String::new();
+    let _input = stdin().read_line(&mut user_input);
+    user_input = user_input.trim().to_string();
+    println!("User input read: {}", &user_input);
+
+    (deletable_saves, user_input)
+}
+
+fn delete(
+    (deletable_saves, user_input): (Vec<SaveInformation>, String),
+) -> Result<Vec<()>, std::io::Error> {
+    if !user_input.eq_ignore_ascii_case("y") {
+        println!("User did not confirm delete");
+        return Ok(Vec::new());
+    }
+    std::env::current_dir().and_then(|current_dir| {
+        deletable_saves
+            .into_iter()
+            .map(move |save_information| {
+                let mut c = current_dir.clone().into_os_string();
+                c.push(format!("/{}", save_information.file_name));
+
+                c.into()
+            })
+            // Remove children in the directory and then remove the directory itself.
+            .map(|path: PathBuf| remove_children_of_dir(&path).and_then(|_| fs::remove_dir(path)))
+            .collect::<Result<Vec<()>, std::io::Error>>()
+    })
+}
+
+fn remove_children_of_dir(path: &impl AsRef<Path>) -> Result<Vec<()>, std::io::Error> {
+    fs::read_dir(path).and_then(|children| {
+        children
+            .flatten()
+            .into_iter()
+            .map(|child| child.path())
+            .map(|child_path: PathBuf| fs::remove_file(child_path))
+            .collect::<Result<Vec<()>, std::io::Error>>()
+    })
 }
 
 #[cfg(test)]
