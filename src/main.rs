@@ -1,4 +1,4 @@
-use std::{collections::HashMap, env, error::Error, fmt::Display, fs, hash::Hash};
+use std::{collections::HashMap, env, error::Error, fmt::Display, fs};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum SaveType {
@@ -90,34 +90,30 @@ impl Display for SelfErrors {
 fn main() {
     match env::current_dir()
         .and_then(fs::read_dir)
-        .and_then(|dir_entries| {
-            // TODO: Split into functions and test?
-            Ok(
-                dir_entries
-                    .flatten()
-                    .filter(|dir_entry| {
-                        dir_entry
-                            .file_type()
-                            .map(|file_type| file_type.is_dir())
-                            .unwrap_or(false)
-                    })
-                    .filter(|dir_entry| {
-                        // Filter empty string folders and non ascii names.
-                        !dir_entry.file_name().is_empty() && dir_entry.file_name().is_ascii()
-                    })
-                    // Parse each directory
-                    .map(|dir_entry| {
-                        dir_entry
-                            .file_name()
-                            .to_str()
-                            .ok_or(SelfErrors::AsciiErrorInFileName(
-                                "Unable to get ascii string from OsString".to_string(),
-                            ))
-                            .and_then(crate::package_details)
-                    })
-                    .flatten() // Up to this point errors only affect individual folders, ignore errors as those folders will be dropped and continue.
-                    .collect::<Vec<SaveInformation>>(), // Done doing for each logic, collect into vector for grouping.
-            )
+        .map(|dir_entries| {
+            dir_entries
+                .flatten()
+                .filter(|dir_entry| {
+                    dir_entry
+                        .file_type()
+                        .map(|file_type| file_type.is_dir())
+                        .unwrap_or(false)
+                })
+                .filter(|dir_entry| {
+                    // Filter empty string folders and non ascii names.
+                    !dir_entry.file_name().is_empty() && dir_entry.file_name().is_ascii()
+                })
+                // Parse each directory
+                .flat_map(|dir_entry| {
+                    dir_entry
+                        .file_name()
+                        .to_str()
+                        .ok_or(SelfErrors::AsciiErrorInFileName(
+                            "Unable to get ascii string from OsString".to_string(),
+                        ))
+                        .and_then(crate::package_details)
+                }) // Up to this point errors only affect individual folders, ignore errors as those folders will be dropped and continue.
+                .collect::<Vec<SaveInformation>>()
         })
         .map(crate::group_saves) // Here errors start to matter for the set, don't drop and output below.
         .map(crate::sort_map_saves)
@@ -669,8 +665,7 @@ mod get_delete_vec_should {
         assert_eq!(
             result
                 .iter()
-                .filter(|save_information| save_information.save_type == SaveType::Quick)
-                .nth(0)
+                .find(|save_information| save_information.save_type == SaveType::Quick)
                 .unwrap()
                 .clone(),
             quick_saves.iter().nth(1).unwrap().clone()
