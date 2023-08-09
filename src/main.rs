@@ -1,4 +1,4 @@
-use std::{collections::HashMap, env, error::Error, fmt::Display, fs};
+use std::{collections::HashMap, env, error::Error, fmt::Display, fs, hash::Hash};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum SaveType {
@@ -53,7 +53,7 @@ impl SaveInformation {
     }
 }
 
-#[derive(Debug, PartialEq, Default)]
+#[derive(Debug, PartialEq, Default, Clone)]
 struct Saves {
     pub quick_saves: Vec<SaveInformation>,
     pub auto_saves: Vec<SaveInformation>,
@@ -73,6 +73,7 @@ enum SelfErrors {
     NameNotDetected(String),
     NotEnoughUnderscores(String),
     StringNotNumber(String),
+    AsciiErrorInFileName(String),
 }
 impl Error for SelfErrors {}
 impl Display for SelfErrors {
@@ -81,6 +82,7 @@ impl Display for SelfErrors {
             SelfErrors::NameNotDetected(e) => write!(f, "{:#?}", e),
             SelfErrors::NotEnoughUnderscores(e) => write!(f, "{:#?}", e),
             SelfErrors::StringNotNumber(e) => write!(f, "{:#?}", e),
+            SelfErrors::AsciiErrorInFileName(e) => write!(f, "{:#?}", e),
         }
     }
 }
@@ -88,25 +90,57 @@ impl Display for SelfErrors {
 fn main() {
     match env::current_dir()
         .and_then(fs::read_dir)
-        .map(|dir_entries| {
-            dir_entries
-                .flatten()
-                .filter(|dir_entry| {
-                    dir_entry
-                        .file_type()
-                        .map(|file_type| file_type.is_dir())
-                        .unwrap_or(false)
-                })
-                .filter(|dir_entry| {
-                    !dir_entry.file_name().is_empty() && dir_entry.file_name().is_ascii()
-                })
-        }) {
-        Ok(_) => todo!(),
+        .and_then(|dir_entries| {
+            // TODO: Split into functions and test?
+            Ok(
+                dir_entries
+                    .flatten()
+                    .filter(|dir_entry| {
+                        dir_entry
+                            .file_type()
+                            .map(|file_type| file_type.is_dir())
+                            .unwrap_or(false)
+                    })
+                    .filter(|dir_entry| {
+                        // Filter empty string folders and non ascii names.
+                        !dir_entry.file_name().is_empty() && dir_entry.file_name().is_ascii()
+                    })
+                    // Parse each directory
+                    .map(|dir_entry| {
+                        dir_entry
+                            .file_name()
+                            .to_str()
+                            .ok_or(SelfErrors::AsciiErrorInFileName(
+                                "Unable to get ascii string from OsString".to_string(),
+                            ))
+                            .and_then(crate::package_details)
+                    })
+                    .flatten() // Up to this point errors only affect individual folders, ignore errors as those folders will be dropped and continue.
+                    .collect::<Vec<SaveInformation>>(), // Done doing for each logic, collect into vector for grouping.
+            )
+        })
+        .map(crate::group_saves) // Here errors start to matter for the set, don't drop and output below.
+        .map(crate::sort_map_saves)
+    {
+        Ok(map) => println!("{:#?}", map),
         Err(e) => {
             println!("Encountered error:");
             println!("{:#?}", e);
         }
     };
+}
+
+fn package_details(file_name: &str) -> Result<SaveInformation, SelfErrors> {
+    let parse_number = save_number(file_name)?;
+    let characters_name = character_name(file_name)?;
+    let s_type = save_type(file_name);
+
+    Ok(SaveInformation::new(
+        file_name.to_string(),
+        characters_name,
+        s_type,
+        parse_number,
+    ))
 }
 
 fn save_type(folder_name: &str) -> SaveType {
@@ -150,19 +184,6 @@ fn save_number(folder_name: &str) -> Result<u16, SelfErrors> {
                 .parse::<u16>()
                 .map_err(|e| SelfErrors::StringNotNumber(e.to_string()))
         })
-}
-
-fn package_details(file_name: &str) -> Result<SaveInformation, SelfErrors> {
-    let parse_number = save_number(file_name)?;
-    let characters_name = character_name(file_name)?;
-    let s_type = save_type(file_name);
-
-    Ok(SaveInformation::new(
-        file_name.to_string(),
-        characters_name,
-        s_type,
-        parse_number,
-    ))
 }
 
 fn group_saves(saves: Vec<SaveInformation>) -> HashMap<String, Saves> {
@@ -211,6 +232,68 @@ fn sort_map_saves(mut map: HashMap<String, Saves>) -> HashMap<String, Saves> {
     });
 
     map
+}
+
+fn get_delete_vec(map: HashMap<String, Saves>, number_to_preserve: usize) -> Vec<SaveInformation> {
+    map.into_iter()
+        .fold(Vec::new(), |deletion_saves, (_, character_saves)| {
+            deletion_saves
+                .into_iter()
+                // Combine existing saves to be deleted with those detected deletable_saves.
+                // The grouping into a map is to apply number_to_preserve to both each character as well as
+                // quick and auto saves.
+                .chain(
+                    deletable_saves(character_saves.quick_saves, number_to_preserve)
+                        .into_iter()
+                        .chain(
+                            deletable_saves(character_saves.auto_saves, number_to_preserve)
+                                .into_iter(),
+                        ),
+                )
+                .collect()
+        })
+}
+
+fn deletable_saves(saves: Vec<SaveInformation>, number_to_preserve: usize) -> Vec<SaveInformation> {
+    if saves.len() <= number_to_preserve {
+        return Vec::new();
+    }
+
+    saves.into_iter().skip(number_to_preserve).collect()
+}
+
+#[cfg(test)]
+mod package_details_should {
+    use rand::Rng;
+
+    use crate::{package_details, SaveInformation, SaveType};
+
+    #[test]
+    fn package_values_returned() {
+        let rand = rand::thread_rng().gen_range(u16::MIN..=u16::MAX);
+        let test_save = format!("Some'me-1231415123_QuickSave_{}", rand);
+
+        let expected = SaveInformation::new(
+            test_save.clone(),
+            "Some'me".to_string(),
+            SaveType::Quick,
+            rand,
+        );
+
+        let result = package_details(test_save.as_str()).unwrap();
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn errors_out_when_error_state_occurs() {
+        let test_save = "Some'me";
+
+        let result = package_details(test_save);
+        assert!(
+            result.is_err(),
+            "Package did not error when it was provided insufficient information"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -344,40 +427,6 @@ mod save_number_should {
 
         let result = save_number(test_save).unwrap_err();
         assert_eq!(result, expected);
-    }
-}
-
-#[cfg(test)]
-mod package_details_should {
-    use rand::Rng;
-
-    use crate::{package_details, SaveInformation, SaveType};
-
-    #[test]
-    fn package_values_returned() {
-        let rand = rand::thread_rng().gen_range(u16::MIN..=u16::MAX);
-        let test_save = format!("Some'me-1231415123_QuickSave_{}", rand);
-
-        let expected = SaveInformation::new(
-            test_save.clone(),
-            "Some'me".to_string(),
-            SaveType::Quick,
-            rand,
-        );
-
-        let result = package_details(test_save.as_str()).unwrap();
-        assert_eq!(result, expected);
-    }
-
-    #[test]
-    fn errors_out_when_error_state_occurs() {
-        let test_save = "Some'me";
-
-        let result = package_details(test_save);
-        assert!(
-            result.is_err(),
-            "Package did not error when it was provided insufficient information"
-        );
     }
 }
 
@@ -569,5 +618,118 @@ mod sort_map_saves_should {
 
         assert_eq!(fl_saves.auto_saves.first().unwrap(), saves.last().unwrap());
         assert_eq!(fl_saves.auto_saves.last().unwrap(), saves.first().unwrap());
+    }
+}
+
+#[cfg(test)]
+mod get_delete_vec_should {
+    use std::collections::HashMap;
+
+    use crate::{get_delete_vec, SaveInformation, SaveType, Saves};
+
+    #[test]
+    fn handle_quick_and_auto_saves() {
+        let mut map = HashMap::new();
+        let name = "First Last".to_string();
+
+        let quick_saves = vec![
+            SaveInformation::new_random(SaveType::Quick, name.to_string()),
+            SaveInformation::new_random(SaveType::Quick, name.to_string()),
+        ];
+        let auto_saves = vec![
+            SaveInformation::new_random(SaveType::Auto, name.to_string()),
+            SaveInformation::new_random(SaveType::Auto, name.to_string()),
+        ];
+
+        map.insert(
+            name.to_string(),
+            Saves {
+                quick_saves: quick_saves.clone(),
+                auto_saves: auto_saves.clone(),
+            },
+        );
+
+        let result = get_delete_vec(map.clone(), 1usize);
+        assert_eq!(result.len(), 2);
+        assert_eq!(
+            result
+                .iter()
+                .filter(|save_information| save_information.save_type == SaveType::Quick)
+                .count(),
+            1
+        );
+        assert_eq!(
+            result
+                .iter()
+                .filter(|save_information| save_information.save_type == SaveType::Auto)
+                .count(),
+            1
+        );
+
+        assert_eq!(
+            result
+                .iter()
+                .filter(|save_information| save_information.save_type == SaveType::Quick)
+                .nth(0)
+                .unwrap()
+                .clone(),
+            quick_saves.iter().nth(1).unwrap().clone()
+        )
+    }
+}
+
+#[cfg(test)]
+mod deletable_saves_should {
+    use rand::Rng;
+
+    use crate::{deletable_saves, SaveInformation, SaveType};
+
+    #[test]
+    fn return_correct_saves_from_fixed_pool() {
+        let saves = vec![
+            SaveInformation::new(
+                "test_file_name1".to_string(),
+                "First Last".to_string(),
+                SaveType::Auto,
+                33u16,
+            ),
+            SaveInformation::new(
+                "test_file_name2".to_string(),
+                "First Last".to_string(),
+                SaveType::Auto,
+                32u16,
+            ),
+            SaveInformation::new(
+                "test_file_name3".to_string(),
+                "First Last".to_string(),
+                SaveType::Auto,
+                31u16,
+            ),
+        ];
+
+        let result = deletable_saves(saves.clone(), 1usize);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result.first().unwrap(), saves.iter().nth(1).unwrap());
+        assert_eq!(result.iter().nth(1).unwrap(), saves.iter().nth(2).unwrap());
+    }
+
+    #[test]
+    fn return_correct_saves_from_randomized_pool() {
+        let mut saves = Vec::new();
+
+        let number_to_generate = rand::thread_rng().gen_range(10..1002);
+
+        for _ in 0..number_to_generate {
+            saves.push(SaveInformation::new_random(
+                SaveType::Quick,
+                "First Last".to_string(),
+            ));
+        }
+
+        let number_to_preserve = rand::thread_rng().gen_range(1..saves.len() - 5);
+        let result = deletable_saves(saves.clone(), number_to_preserve);
+
+        assert_ne!(result.len(), saves.len());
+        assert_eq!(result.len(), number_to_generate - number_to_preserve);
     }
 }
