@@ -33,8 +33,10 @@ struct ProgramConfig {
 fn main() {
     let program_config = ProgramConfig::parse();
 
-    match env::current_dir()
-        .and_then(fs::read_dir)
+    match path_to_use(program_config.path_to_save_folder.clone())
+        .and_then(|path| {
+            fs::read_dir(path).map_err(|e| ProgramError::CannotReadDirectory(e.to_string()))
+        })
         .map(|dir_entries| {
             dir_entries
                 .flatten()
@@ -69,9 +71,16 @@ fn main() {
         Ok(map) => println!("{:#?}", map),
         Err(e) => {
             println!("Encountered error:");
-            println!("{:#?}", e);
+            println!("{}", e);
         }
     };
+}
+
+fn path_to_use(given_path: Option<OsString>) -> Result<PathBuf, ProgramError> {
+    match given_path {
+        Some(path) => return Ok(PathBuf::from(path)),
+        None => return env::current_dir().map_err(|e| ProgramError::NoPath(e.to_string())),
+    }
 }
 
 fn package_details(file_name: &str) -> Result<SaveInformation, ProgramError> {
@@ -227,35 +236,49 @@ fn confirm_user_delete(deletable_saves: Vec<SaveInformation>) -> (Vec<SaveInform
 
 fn delete(
     (deletable_saves, user_input): (Vec<SaveInformation>, String),
-) -> Result<Vec<()>, std::io::Error> {
+) -> Result<Vec<()>, ProgramError> {
     if !user_input.eq_ignore_ascii_case("y") {
         println!("User did not confirm delete");
         return Ok(Vec::new());
     }
-    std::env::current_dir().and_then(|current_dir| {
-        deletable_saves
-            .into_iter()
-            .map(move |save_information| {
-                let mut c = current_dir.clone().into_os_string();
-                c.push(format!("/{}", save_information.file_name));
+    std::env::current_dir()
+        .map_err(|e| ProgramError::NoPath(e.to_string()))
+        .and_then(|current_dir| {
+            deletable_saves
+                .into_iter()
+                .map(move |save_information| {
+                    let mut c = current_dir.clone().into_os_string();
+                    c.push(format!("/{}", save_information.file_name));
 
-                c.into()
-            })
-            // Remove children in the directory and then remove the directory itself.
-            .map(|path: PathBuf| remove_children_of_dir(&path).and_then(|_| fs::remove_dir(path)))
-            .collect::<Result<Vec<()>, std::io::Error>>()
-    })
+                    c.into()
+                })
+                // Remove children in the directory and then remove the directory itself.
+                .map(|path: PathBuf| {
+                    remove_children_of_dir(&path)
+                        .and_then(|_| {
+                            fs::remove_dir(path)
+                                .map_err(|e| ProgramError::FailedToDelete(e.to_string()))
+                        })
+                        .map_err(|e| ProgramError::FailedToDelete(e.to_string()))
+                })
+                .collect::<Result<Vec<()>, ProgramError>>()
+        })
 }
 
-fn remove_children_of_dir(path: &impl AsRef<Path>) -> Result<Vec<()>, std::io::Error> {
-    fs::read_dir(path).and_then(|children| {
-        children
-            .flatten()
-            .into_iter()
-            .map(|child| child.path())
-            .map(|child_path: PathBuf| fs::remove_file(child_path))
-            .collect::<Result<Vec<()>, std::io::Error>>()
-    })
+fn remove_children_of_dir(path: &impl AsRef<Path>) -> Result<Vec<()>, ProgramError> {
+    fs::read_dir(path)
+        .map_err(|e| ProgramError::FailedToReadDir(e.to_string()))
+        .and_then(|children| {
+            children
+                .flatten()
+                .into_iter()
+                .map(|child| child.path())
+                .map(|child_path: PathBuf| {
+                    fs::remove_file(child_path)
+                        .map_err(|e| ProgramError::FailedToDelete(e.to_string()))
+                })
+                .collect::<Result<Vec<()>, ProgramError>>()
+        })
 }
 
 #[cfg(test)]
