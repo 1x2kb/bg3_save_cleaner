@@ -5,17 +5,34 @@ mod saves;
 
 use std::{
     collections::HashMap,
-    env, fs,
+    env,
+    ffi::OsString,
+    fs,
     io::{stdin, stdout, Write},
     path::{Path, PathBuf},
 };
 
+use clap::Parser;
 use program_errors::ProgramError;
 use save_information::SaveInformation;
 use save_type::SaveType;
 use saves::Saves;
 
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct ProgramConfig {
+    /// The path the program should run against.
+    #[arg(short, long)]
+    path_to_save_folder: Option<OsString>,
+
+    /// The latest n saves to ignore when selecting saves for deletion
+    #[arg(short, long)]
+    saves_to_preserve: Option<usize>,
+}
+
 fn main() {
+    let program_config = ProgramConfig::parse();
+
     match env::current_dir()
         .and_then(fs::read_dir)
         .map(|dir_entries| {
