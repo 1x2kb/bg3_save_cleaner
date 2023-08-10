@@ -30,13 +30,24 @@ struct ProgramConfig {
     saves_to_preserve: Option<usize>,
 }
 
-fn main() {
-    let program_config = ProgramConfig::parse();
+const DEFAULT_SAVES_TO_PRESERVE: usize = 10;
 
-    match path_to_use(program_config.path_to_save_folder.clone())
-        .and_then(|path| {
-            fs::read_dir(path).map_err(|e| ProgramError::CannotReadDirectory(e.to_string()))
-        })
+fn main() -> Result<(), ProgramError> {
+    let program_config = ProgramConfig::parse();
+    let saves_to_preserve = program_config
+        .saves_to_preserve
+        .unwrap_or(DEFAULT_SAVES_TO_PRESERVE);
+
+    let directory = path_to_use(program_config.path_to_save_folder)?;
+
+    println!(
+        "Running program with saves_to_preserve: {} and path: {}",
+        &saves_to_preserve,
+        &directory.to_str().unwrap() // unwrap?
+    );
+
+    match fs::read_dir(directory.clone())
+        .map_err(|e| ProgramError::CannotReadDirectory(e.to_string()))
         .map(|dir_entries| {
             dir_entries
                 .flatten()
@@ -64,16 +75,18 @@ fn main() {
         })
         .map(crate::group_saves) // Here errors start to matter for the set, don't drop and output below.
         .map(crate::sort_map_saves)
-        .map(|map| get_delete_vec(map, 1usize))
+        .map(|map| get_delete_vec(map, saves_to_preserve))
         .map(crate::confirm_user_delete)
-        .and_then(crate::delete)
+        .and_then(|(deletable_saves, user_input)| delete((deletable_saves, user_input, directory)))
     {
-        Ok(map) => println!("{:#?}", map),
+        Ok(_) => (),
         Err(e) => {
             println!("Encountered error:");
             println!("{}", e);
         }
     };
+
+    Ok(())
 }
 
 fn path_to_use(given_path: Option<OsString>) -> Result<PathBuf, ProgramError> {
@@ -235,34 +248,28 @@ fn confirm_user_delete(deletable_saves: Vec<SaveInformation>) -> (Vec<SaveInform
 }
 
 fn delete(
-    (deletable_saves, user_input): (Vec<SaveInformation>, String),
+    (deletable_saves, user_input, dir_to_use): (Vec<SaveInformation>, String, PathBuf),
 ) -> Result<Vec<()>, ProgramError> {
     if !user_input.eq_ignore_ascii_case("y") {
         println!("User did not confirm delete");
         return Ok(Vec::new());
     }
-    std::env::current_dir()
-        .map_err(|e| ProgramError::NoPath(e.to_string()))
-        .and_then(|current_dir| {
-            deletable_saves
-                .into_iter()
-                .map(move |save_information| {
-                    let mut c = current_dir.clone().into_os_string();
-                    c.push(format!("/{}", save_information.file_name));
 
-                    c.into()
-                })
-                // Remove children in the directory and then remove the directory itself.
-                .map(|path: PathBuf| {
-                    remove_children_of_dir(&path)
-                        .and_then(|_| {
-                            fs::remove_dir(path)
-                                .map_err(|e| ProgramError::FailedToDelete(e.to_string()))
-                        })
-                        .map_err(|e| ProgramError::FailedToDelete(e.to_string()))
-                })
-                .collect::<Result<Vec<()>, ProgramError>>()
+    deletable_saves
+        .into_iter()
+        .map(move |save_information| {
+            let mut c = dir_to_use.clone().into_os_string();
+            c.push(format!("/{}", save_information.file_name));
+
+            c.into()
         })
+        // Remove children in the directory and then remove the directory itself.
+        .map(|path: PathBuf| {
+            remove_children_of_dir(&path).and_then(|_| {
+                fs::remove_dir(path).map_err(|e| ProgramError::FailedToDelete(e.to_string()))
+            })
+        })
+        .collect::<Result<Vec<()>, ProgramError>>()
 }
 
 fn remove_children_of_dir(path: &impl AsRef<Path>) -> Result<Vec<()>, ProgramError> {
@@ -277,7 +284,7 @@ fn remove_children_of_dir(path: &impl AsRef<Path>) -> Result<Vec<()>, ProgramErr
                     fs::remove_file(child_path)
                         .map_err(|e| ProgramError::FailedToDelete(e.to_string()))
                 })
-                .collect::<Result<Vec<()>, ProgramError>>()
+                .collect::<Result<Vec<()>, ProgramError>>() // TODO: Review. This is going to drop some errors silently.
         })
 }
 
