@@ -1,99 +1,19 @@
+mod program_errors;
+mod save_information;
+mod save_type;
+mod saves;
+
 use std::{
     collections::HashMap,
-    env,
-    error::Error,
-    fmt::Display,
-    fs,
+    env, fs,
     io::{stdin, stdout, Write},
     path::{Path, PathBuf},
 };
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub enum SaveType {
-    Quick,
-    Auto,
-    Unrecognized,
-}
-
-#[derive(Debug, PartialEq, Clone)]
-struct SaveInformation {
-    pub file_name: String,
-    pub character_name: String,
-    pub save_type: SaveType,
-    pub save_number: u16,
-}
-impl SaveInformation {
-    pub fn new(
-        file_name: String,
-        character_name: String,
-        save_type: SaveType,
-        save_number: u16,
-    ) -> Self {
-        SaveInformation {
-            file_name,
-            character_name,
-            save_type,
-            save_number,
-        }
-    }
-
-    #[cfg(test)]
-    pub fn new_random(save_type: SaveType, character_name: String) -> Self {
-        use rand::Rng;
-
-        let save_number = rand::thread_rng().gen_range(u16::MIN..=u16::MAX);
-
-        match save_type {
-            SaveType::Quick => SaveInformation {
-                file_name: format!("{}-123456789__QuickSave_{}", character_name, save_number),
-                character_name,
-                save_type,
-                save_number,
-            },
-            SaveType::Auto => SaveInformation {
-                file_name: format!("{}-123456789__AutoSave_{}", character_name, save_number),
-                character_name,
-                save_type,
-                save_number,
-            },
-            _ => panic!("Not a randomizable save pattern"),
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Default, Clone)]
-struct Saves {
-    pub quick_saves: Vec<SaveInformation>,
-    pub auto_saves: Vec<SaveInformation>,
-}
-impl Saves {
-    pub fn new() -> Self {
-        Saves {
-            quick_saves: Vec::new(),
-            auto_saves: Vec::new(),
-        }
-    }
-}
-
-// TODO: Rename
-#[derive(Debug, PartialEq)]
-enum SelfErrors {
-    NameNotDetected(String),
-    NotEnoughUnderscores(String),
-    StringNotNumber(String),
-    AsciiErrorInFileName(String),
-}
-impl Error for SelfErrors {}
-impl Display for SelfErrors {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SelfErrors::NameNotDetected(e) => write!(f, "{:#?}", e),
-            SelfErrors::NotEnoughUnderscores(e) => write!(f, "{:#?}", e),
-            SelfErrors::StringNotNumber(e) => write!(f, "{:#?}", e),
-            SelfErrors::AsciiErrorInFileName(e) => write!(f, "{:#?}", e),
-        }
-    }
-}
+use program_errors::ProgramError;
+use save_information::SaveInformation;
+use save_type::SaveType;
+use saves::Saves;
 
 fn main() {
     match env::current_dir()
@@ -116,7 +36,7 @@ fn main() {
                     dir_entry
                         .file_name()
                         .to_str()
-                        .ok_or(SelfErrors::AsciiErrorInFileName(
+                        .ok_or(ProgramError::AsciiErrorInFileName(
                             "Unable to get ascii string from OsString".to_string(),
                         ))
                         .and_then(crate::package_details)
@@ -137,7 +57,7 @@ fn main() {
     };
 }
 
-fn package_details(file_name: &str) -> Result<SaveInformation, SelfErrors> {
+fn package_details(file_name: &str) -> Result<SaveInformation, ProgramError> {
     let parse_number = save_number(file_name)?;
     let characters_name = character_name(file_name)?;
     let s_type = save_type(file_name);
@@ -160,21 +80,21 @@ fn save_type(folder_name: &str) -> SaveType {
     }
 }
 
-fn character_name(folder_name: &str) -> Result<String, SelfErrors> {
+fn character_name(folder_name: &str) -> Result<String, ProgramError> {
     folder_name
         .find('-')
         .filter(|index| index > &0)
         .map(|index| folder_name.chars().take(index).collect())
-        .ok_or(SelfErrors::NameNotDetected(
+        .ok_or(ProgramError::NameNotDetected(
             "Could not detect character name".to_string(),
         ))
 }
 
-fn save_number(folder_name: &str) -> Result<u16, SelfErrors> {
+fn save_number(folder_name: &str) -> Result<u16, ProgramError> {
     let folder_name: Vec<&str> = folder_name.split('_').collect();
 
     if folder_name.len() <= 1 {
-        return Err(SelfErrors::NotEnoughUnderscores(
+        return Err(ProgramError::NotEnoughUnderscores(
             "Did not find the correct number of underscores. Cannot continue with this save."
                 .to_string(),
         ));
@@ -183,13 +103,13 @@ fn save_number(folder_name: &str) -> Result<u16, SelfErrors> {
     folder_name
         .into_iter()
         .last()
-        .ok_or(SelfErrors::NotEnoughUnderscores(
+        .ok_or(ProgramError::NotEnoughUnderscores(
             "Could not find any elements".to_string(),
         ))
         .and_then(|save_number| {
             save_number
                 .parse::<u16>()
-                .map_err(|e| SelfErrors::StringNotNumber(e.to_string()))
+                .map_err(|e| ProgramError::StringNotNumber(e.to_string()))
         })
 }
 
@@ -388,7 +308,7 @@ mod save_type_should {
 
 #[cfg(test)]
 mod character_name_should {
-    use crate::{character_name, SelfErrors};
+    use crate::{character_name, ProgramError};
 
     #[test]
     fn detect_with_space() {
@@ -429,7 +349,7 @@ mod character_name_should {
     #[test]
     fn error_when_no_dashes() {
         let test_save = "Some'me";
-        let expected = SelfErrors::NameNotDetected("Could not detect character name".to_string());
+        let expected = ProgramError::NameNotDetected("Could not detect character name".to_string());
 
         let error = character_name(test_save).unwrap_err();
         assert_eq!(error, expected);
@@ -440,7 +360,7 @@ mod character_name_should {
 mod save_number_should {
     use rand::Rng;
 
-    use crate::{save_number, SelfErrors};
+    use crate::{save_number, ProgramError};
 
     #[test]
     fn convert_max_number() {
@@ -470,7 +390,7 @@ mod save_number_should {
     #[test]
     fn error_on_negative_number() {
         let test_save = format!("Some'me-1231415123_QuickSave_{}", -22);
-        let expected = SelfErrors::StringNotNumber("invalid digit found in string".to_string());
+        let expected = ProgramError::StringNotNumber("invalid digit found in string".to_string());
 
         let result = save_number(&test_save).unwrap_err();
         assert_eq!(result, expected);
@@ -479,7 +399,7 @@ mod save_number_should {
     #[test]
     fn error_when_no_underscores() {
         let test_save = "Some'me";
-        let expected = SelfErrors::NotEnoughUnderscores(
+        let expected = ProgramError::NotEnoughUnderscores(
             "Did not find the correct number of underscores. Cannot continue with this save."
                 .to_string(),
         );
