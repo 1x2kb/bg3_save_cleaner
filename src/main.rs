@@ -162,16 +162,9 @@ fn group_by_character(
     mut map: HashMap<String, Saves>,
     save_information: SaveInformation,
 ) -> HashMap<String, Saves> {
-    // TODO: I think there's a better way. Come back to this.
-    let saves = match map.get_mut(&save_information.character_name) {
-        Some(saves) => saves, // Saves already exists
-        None => {
-            // Need to create Saves struct for map
-            let save_by_type = Saves::new();
-            map.insert(save_information.character_name.clone(), save_by_type);
-            map.get_mut(&save_information.character_name).unwrap()
-        }
-    };
+    let saves = map
+        .entry(save_information.character_name.to_string())
+        .or_insert_with(|| Saves::new());
 
     insert_save(saves, save_information);
 
@@ -236,7 +229,7 @@ fn confirm_user_delete(deletable_saves: Vec<SaveInformation>) -> (Vec<SaveInform
         .for_each(|(i, save)| println!("\t{} | {}", i + 1, &save.file_name));
     println!("****");
 
-    print!("Do you want to delete the above files? y/n: ");
+    print!("Delete the above files? y/n: ");
     let _ = stdout().flush();
 
     let mut user_input = String::new();
