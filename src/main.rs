@@ -91,8 +91,8 @@ fn main() -> Result<(), ProgramError> {
 
 fn path_to_use(given_path: Option<OsString>) -> Result<PathBuf, ProgramError> {
     match given_path {
-        Some(path) => return Ok(PathBuf::from(path)),
-        None => return env::current_dir().map_err(|e| ProgramError::NoPath(e.to_string())),
+        Some(path) => Ok(PathBuf::from(path)),
+        None => env::current_dir().map_err(|e| ProgramError::NoPath(e.to_string())),
     }
 }
 
@@ -164,7 +164,7 @@ fn group_by_character(
 ) -> HashMap<String, Saves> {
     let saves = map
         .entry(save_information.character_name.to_string())
-        .or_insert_with(|| Saves::new());
+        .or_insert_with(Saves::new);
 
     insert_save(saves, save_information);
 
@@ -271,7 +271,6 @@ fn remove_children_of_dir(path: &impl AsRef<Path>) -> Result<Vec<()>, ProgramErr
         .and_then(|children| {
             children
                 .flatten()
-                .into_iter()
                 .map(|child| child.path())
                 .map(|child_path: PathBuf| {
                     fs::remove_file(child_path)
@@ -727,8 +726,8 @@ mod deletable_saves_should {
 
         let result = deletable_saves(saves.clone(), 1usize);
         assert_eq!(result.len(), 2);
-        assert_eq!(result.first().unwrap(), saves.iter().nth(1).unwrap());
-        assert_eq!(result.iter().nth(1).unwrap(), saves.iter().nth(2).unwrap());
+        assert_eq!(result.first().unwrap(), saves.get(1).unwrap());
+        assert_eq!(result.get(1).unwrap(), saves.get(2).unwrap());
     }
 
     #[test]
