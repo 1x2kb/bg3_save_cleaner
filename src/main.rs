@@ -214,10 +214,6 @@ fn get_delete_vec(map: HashMap<String, Saves>, number_to_preserve: usize) -> Vec
 }
 
 fn deletable_saves(saves: Vec<SaveInformation>, number_to_preserve: usize) -> Vec<SaveInformation> {
-    if saves.len() <= number_to_preserve {
-        return Vec::new();
-    }
-
     saves.into_iter().skip(number_to_preserve).collect()
 }
 
@@ -748,5 +744,35 @@ mod deletable_saves_should {
 
         assert_ne!(result.len(), saves.len());
         assert_eq!(result.len(), number_to_generate - number_to_preserve);
+    }
+
+    #[test]
+    fn return_empty_vec_when_preserves_all() {
+        let saves = vec![
+            SaveInformation::new(
+                "test_file_name1".to_string(),
+                "First Last".to_string(),
+                SaveType::Auto,
+                33u16,
+            ),
+            SaveInformation::new(
+                "test_file_name2".to_string(),
+                "First Last".to_string(),
+                SaveType::Auto,
+                32u16,
+            ),
+            SaveInformation::new(
+                "test_file_name3".to_string(),
+                "First Last".to_string(),
+                SaveType::Auto,
+                31u16,
+            ),
+        ];
+
+        let result = deletable_saves(saves, 5usize);
+        assert!(
+            result.is_empty(),
+            "Vector was not empty when asked to preserve more saves than were present"
+        );
     }
 }
